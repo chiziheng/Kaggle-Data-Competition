@@ -1,0 +1,224 @@
+```{r}
+rm(list=ls())
+library(keras)
+library(tensorflow)
+library(tm)
+library(SnowballC)
+library(caTools)
+library(wordcloud)
+library(data.table)
+library(sentimentr)
+library(textclean)
+library(tokenizers)
+```
+
+
+```{r}
+removeEmoticon <- function(x){
+  gsub("[^\x01-\x7F]", "", x)
+}
+
+removelink <- function(x){
+  gsub("\\{link}", "", x)
+}
+
+removeMention <- function(x){
+  gsub("@\\w+", "", x)
+}
+
+replacesmiley1 <- function(x){
+  gsub("\\:)|\\:-)|\\(:|\\;)|\\:D|\\(-:", "smiley", x)
+}
+
+replacesmiley2 <- function(x){
+  gsub("\\:-)", "smiley", x)
+}
+
+replacesmiley3 <- function(x){
+  gsub("\\(:", "smiley", x)
+}
+
+replacesmiley4 <- function(x){
+  gsub("\\;)", "smiley", x)
+}
+
+replacesmiley5 <- function(x){
+  gsub("\\(;", "smiley", x)
+}
+
+replacesmiley6 <- function(x){
+  gsub("\\:D", "smiley", x)
+}
+
+replacesmiley7 <- function(x){
+  gsub("\\(-:", "smiley", x)
+}
+
+replacesad1 <- function(x){
+  gsub("\\:\\(","sad", x)
+} 
+
+replacesad2 <- function(x){
+  gsub("\\):", "sad", x)
+} 
+
+replacesad3 <- function(x){
+  gsub("\\:/", "sad", x)
+} 
+
+replacesad4 <- function(x){
+  gsub("\\(:-()", "sad", x)
+}
+
+replacesad5 <- function(x){
+  gsub("\\)-:", "sad", x)
+}
+
+replacesad6 <- function(x){
+  gsub("\\:'\\(", "sad", x)
+}
+
+replacesad7 <- function(x){
+  gsub("\\)':", "sad", x)
+}
+
+replacesad8 <- function(x){
+  gsub("\\-_-", "sad", x)
+}
+
+replacesad9 <- function(x){
+  gsub("fml|wtf", "sad", x)
+}
+
+remove2dots <- function(x){
+  gsub("\\..", " ", x)
+}
+
+remove3dots <- function(x){
+  gsub("\\...", " ", x)
+}
+
+remove4dots <- function(x){
+  gsub("\\....", " ", x)
+}
+
+remove5dots <- function(x){
+  gsub("\\.....", " Frown ", x)
+}
+
+remove6dots <- function(x){
+  gsub("\\......", " Frown ", x)
+}
+```
+
+```{r}
+twitter <- read.csv('train.csv',stringsAsFactors = FALSE)
+testset <- read.csv('test.csv',stringsAsFactors = FALSE)
+tweet <- c(twitter$tweet,testset$tweet)
+text <- add_comma_space(tweet)
+text <- replace_contraction(text)  #change I'll to I will
+text <- replace_tag(text)  #Replace Twitter style handle tag (e.g., @trinker)
+text <- replace_html(text)  #Replace HTML tags and symbols
+text <- replace_emoticon(text)
+text <- replace_ordinal(text, remove = TRUE)  #remove ordinal number
+corpus <- Corpus(VectorSource(text))
+corpus <- tm_map(corpus, content_transformer(tolower))  
+corpus <- tm_map(corpus, content_transformer(replacesmiley1))
+corpus <- tm_map(corpus, content_transformer(replacesmiley2))
+corpus <- tm_map(corpus, content_transformer(replacesmiley3))
+corpus <- tm_map(corpus, content_transformer(replacesmiley4))
+corpus <- tm_map(corpus, content_transformer(replacesmiley5))
+corpus <- tm_map(corpus, content_transformer(replacesmiley6))
+corpus <- tm_map(corpus, content_transformer(replacesmiley7))
+corpus <- tm_map(corpus, content_transformer(replacesad1))
+corpus <- tm_map(corpus, content_transformer(replacesad2))
+corpus <- tm_map(corpus, content_transformer(replacesad3))
+corpus <- tm_map(corpus, content_transformer(replacesad4))
+corpus <- tm_map(corpus, content_transformer(replacesad5))
+corpus <- tm_map(corpus, content_transformer(replacesad6))
+corpus <- tm_map(corpus, content_transformer(replacesad7))
+corpus <- tm_map(corpus, content_transformer(replacesad8))
+corpus <- tm_map(corpus, content_transformer(replacesad9))
+corpus <- tm_map(corpus, content_transformer(removeEmoticon))
+corpus <- tm_map(corpus, content_transformer(remove2dots))
+corpus <- tm_map(corpus, content_transformer(remove3dots))
+corpus <- tm_map(corpus, content_transformer(remove4dots))
+corpus <- tm_map(corpus, content_transformer(remove5dots))
+corpus <- tm_map(corpus, content_transformer(remove6dots))
+corpus <- tm_map(corpus,content_transformer(removelink))
+corpus <- tm_map(corpus,content_transformer(removeMention))
+corpus <- tm_map(corpus, removePunctuation)
+corpus <- tm_map(corpus, stemDocument)
+corpus <- tm_map(corpus,removeWords,c("percent","number","weather","link","feel","mention","day","outsid","today","time","east","west","north","south","the","and","for","this","out"))
+dtm <- DocumentTermMatrix(corpus)
+```
+
+
+```{r}
+spdtm <- removeSparseTerms(dtm, 0.99995)
+ncol(spdtm)
+```
+
+```{r}
+data_full <- as.matrix(spdtm)
+data <- cbind(data_full[1:22500,],twitter$sentiment)
+final_test <- data_full[22501:30000,]
+set.seed(111)
+n <- ncol(data)-1
+y <- ncol(data)
+ind <- sample(2, nrow(data), replace = T, prob = c(0.7,0.3))
+training <- data[,1:n]
+trainingtarget <- data[,y]
+```
+
+```{r}
+#One Hot Encoding
+trainLabels <- to_categorical(trainingtarget)
+trainLabels <- trainLabels[,2:4]
+head(trainLabels)
+dim(trainLabels)
+dim(training)
+```
+
+```{r}
+# Initialize a sequential model
+model <- keras_model_sequential() 
+
+# Add layers to the model
+model %>% 
+    layer_dense(units = 3, activation = 'relu', input_shape = ncol(training)) %>% 
+    #layer_dense(units = 3, activation = 'relu') %>%
+    layer_dense(units = ncol(trainLabels), activation = 'softmax')
+summary(model)
+
+# Compile the model
+model %>% compile(
+     loss = 'categorical_crossentropy',
+     optimizer = 'adam',
+     metrics = 'accuracy'
+)
+
+#Fit Model
+history <- model %>% fit(
+         training,
+         trainLabels,
+         epoch = 7,
+         batch_size = 36,
+         #validation_split = 0.2
+)
+
+```
+
+```{r}
+pred_test <- model %>%
+         predict_classes(final_test)
+length(final_test)
+length(pred_test)
+pred <- pred_test+1
+
+res <- data.frame(Id = testset$Id,
+                 sentiment = pred)
+write.csv(res,"File_name", row.names = FALSE)
+```
+
+
